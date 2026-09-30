@@ -6,8 +6,9 @@ import {
   makeChangelogHooks,
 } from "@auto-it/core/dist/utils/make-hooks";
 import { execSync } from "child_process";
+import fs from "fs";
 
-import Exec from "../src";
+import Exec, { MAX_ENV_VAR_SIZE } from "../src";
 
 const getMockAuto = () => {
   const hooks = makeHooks();
@@ -89,6 +90,40 @@ describe("Exec Plugin", () => {
       expect.stringContaining("Received E2BIG from execSync.")
     );
     expect(mockExit).toHaveBeenCalledWith(1);
+  });
+
+  test("should pass hook args in environment", async () => {
+    const plugins = new Exec({ afterRelease: "echo foo" });
+    const mockAuto = getMockAuto();
+
+    plugins.apply(mockAuto);
+    await mockAuto.hooks.afterRelease.promise({ newVersion: "1.0.0" } as any);
+
+    const { env } = execSpy.mock.calls[0][1];
+    expect(env.ARG_0).toBe(JSON.stringify({ newVersion: "1.0.0" }));
+    expect(env.ARG_0_FILE).toBeUndefined();
+  });
+
+  test("should pass too large hook args via a temporary file", async () => {
+    const arg = { releaseNotes: "x".repeat(MAX_ENV_VAR_SIZE) };
+    let content: string | undefined;
+    let file: string | undefined;
+
+    execSpy.mockImplementation((command, options) => {
+      file = options.env.ARG_0_FILE;
+      content = fs.readFileSync(file as string, "utf8");
+      return "";
+    });
+
+    const plugins = new Exec({ afterRelease: "echo foo" });
+    const mockAuto = getMockAuto();
+
+    plugins.apply(mockAuto);
+    await mockAuto.hooks.afterRelease.promise(arg as any);
+
+    expect(execSpy.mock.calls[0][1].env.ARG_0).toBeUndefined();
+    expect(content).toBe(JSON.stringify(arg));
+    expect(fs.existsSync(file as string)).toBe(false);
   });
 
   test("logs other errors normally", async () => {

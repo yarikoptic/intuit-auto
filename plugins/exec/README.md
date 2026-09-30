@@ -20,6 +20,8 @@ Here is an example of replacing the `npm` plugins with a light-weight version.
 
 All args to a hook are exposed on the process in environment variables.
 The format looks like `$ARG_0`, `$ARG_1`, and so on.
+Each value is JSON encoded.
+An arg too large to be passed through the environment (e.g. `afterRelease` args for a release with many commits, which would otherwise fail with `E2BIG`) is instead written to a temporary JSON file whose path is exposed as `$ARG_0_FILE`, `$ARG_1_FILE`, and so on.
 Please look at the docs for [writing plugins](https://intuit.github.io/auto/docs/plugins/writing-plugins) for more detail on what's available.
 
 ```json

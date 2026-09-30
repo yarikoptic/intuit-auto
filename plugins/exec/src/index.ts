@@ -11,6 +11,9 @@ import * as t from "io-ts";
 import fromEntries from "fromentries";
 import endent from "endent";
 import { execSync, ExecSyncOptionsWithStringEncoding } from "child_process";
+import fs from "fs";
+import os from "os";
+import path from "path";
 
 type CommandMap = Record<string, string | undefined>;
 
@@ -58,33 +61,81 @@ const pluginOptions = t.intersection([
 
 export type IExecPluginOptions = t.TypeOf<typeof pluginOptions>;
 
-/** Put args in envirnment */
-const createEnv = (args: any[]) => ({
-  ...process.env,
-  ...fromEntries(
-    args.map((arg, index) => [`ARG_${index}`, JSON.stringify(arg)])
-  ),
-});
+/**
+ * Maximum size of a single "NAME=value" environment string.
+ * Linux refuses (E2BIG) any single argument or environment string larger
+ * than MAX_ARG_STRLEN (32 pages = 128KiB), regardless of the overall ARG_MAX.
+ */
+export const MAX_ENV_VAR_SIZE = 128 * 1024 - 1;
+
+/**
+ * Put args in environment. Args which are too large to be passed through
+ * the environment are written to a temporary file instead, and the path to
+ * it is exposed as ARG_<index>_FILE.
+ */
+const createEnv = (args: any[], auto: Auto) => {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  const files: string[] = [];
+  let tmpDir: string | undefined;
+
+  args.forEach((arg, index) => {
+    const name = `ARG_${index}`;
+    const value = JSON.stringify(arg);
+
+    if (value === undefined) {
+      return;
+    }
+
+    if (Buffer.byteLength(`${name}=${value}`) <= MAX_ENV_VAR_SIZE) {
+      env[name] = value;
+      return;
+    }
+
+    tmpDir = tmpDir || fs.mkdtempSync(path.join(os.tmpdir(), "auto-exec-"));
+    const file = path.join(tmpDir, `${name}.json`);
+
+    fs.writeFileSync(file, value);
+    files.push(file);
+    env[`${name}_FILE`] = file;
+    auto.logger.verbose.info(
+      `${name} is too large to pass via environment (${value.length} chars), wrote it to ${file} (available as $${name}_FILE)`
+    );
+  });
+
+  return {
+    env,
+    /** Remove the temporary files created for too large args */
+    cleanup: () => {
+      files.forEach((file) => fs.unlinkSync(file));
+
+      if (tmpDir) {
+        fs.rmdirSync(tmpDir);
+      }
+    },
+  };
+};
 
 /** Wraps execSync around debugging and error handling */
 const runExecSync = (
   command: string,
-  options: ExecSyncOptionsWithStringEncoding | undefined,
+  options: Omit<ExecSyncOptionsWithStringEncoding, "env">,
+  args: any[],
   auto: Auto
 ): string | undefined => {
   let execResult;
+  const { env, cleanup } = createEnv(args, auto);
 
   try {
     auto.logger.verbose.info(`Running command: ${command}`);
     auto.logger.veryVerbose.info(endent`
     Supplied Environment (name and char size):
     
-    ${Object.entries(options?.env || {})
+    ${Object.entries(env)
       .map(([key, value]) => `\t${key}=${value ? value.length : 0}`)
       .join("\n")}
     `);
 
-    execResult = trim(execSync(command, options));
+    execResult = trim(execSync(command, { ...options, env }));
   } catch (e) {
     if (e && e.code === "E2BIG") {
       auto.logger.log.error(endent`
@@ -99,6 +150,8 @@ const runExecSync = (
     }
 
     process.exit(1);
+  } finally {
+    cleanup();
   }
 
   return execResult;
@@ -133,8 +186,8 @@ const tapHook = (name: string, hook: any, command: string, auto: Auto) => {
           {
             stdio: ["ignore", "pipe", "inherit"],
             encoding: "utf8",
-            env: createEnv(args),
           },
+          args,
           auto
         )
       );
@@ -162,8 +215,8 @@ const tapHook = (name: string, hook: any, command: string, auto: Auto) => {
           {
             stdio: ["ignore", "pipe", "inherit"],
             encoding: "utf8",
-            env: createEnv(args),
           },
+          args,
           auto
         )
       );
@@ -185,12 +238,12 @@ const tapHook = (name: string, hook: any, command: string, auto: Auto) => {
           command,
           {
             encoding: "utf8",
-            env: createEnv(args),
             stdio:
               name === "createChangelogTitle" || name === "getPreviousVersion"
                 ? ["ignore", "pipe", "inherit"]
                 : "inherit",
           },
+          args,
           auto
         )
       )
