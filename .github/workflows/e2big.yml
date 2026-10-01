@@ -17,6 +17,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Tag the root commit as v0.0.0 (locally)
+        run: git tag v0.0.0 "$(git rev-list --max-parents=0 HEAD)"
+
       - name: Download latest released auto
         run: |
           url="$(curl -fsSL https://api.github.com/repos/intuit/auto/releases/latest | jq -r '.assets[] | select(.name == "auto-linux.gz") | .browser_download_url')"
@@ -46,6 +49,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Tag the root commit as v0.0.0 (locally)
+        run: git tag v0.0.0 "$(git rev-list --max-parents=0 HEAD)"
 
       - name: Check out auto with the fix
         uses: actions/checkout@v4

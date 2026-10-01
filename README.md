@@ -5,7 +5,7 @@ exists to reproduce https://github.com/intuit/auto/issues/1294 and to check
 the fix proposed in https://github.com/yarikoptic/intuit-auto/pull/1.
 
 - `.autorc` uses the `exec` plugin with an `afterRelease` hook.
-- The `v0.0.0` tag marks the root commit; on top of it come 150 commits
+- The workflow tags the root commit as `v0.0.0` (locally); on top of it come 150 commits
   with long messages, so the JSON of `afterRelease`'s argument (`ARG_0`)
   exceeds Linux's 128KiB limit for a single environment string
   (`MAX_ARG_STRLEN`).
