@@ -1,0 +1,10 @@
+{
+  "plugins": [
+    [
+      "exec",
+      {
+        "afterRelease": "if [ -n \"$ARG_0_FILE\" ]; then echo \"afterRelease: ARG_0 passed via file $ARG_0_FILE ($(wc -c < \"$ARG_0_FILE\") bytes)\"; python3 -c 'import json, os; d = json.load(open(os.environ[\"ARG_0_FILE\"])); print(\"afterRelease: newVersion\", d[\"newVersion\"], \"with\", len(d[\"commits\"]), \"commits\")'; else echo \"afterRelease: ARG_0 passed via environment (${#ARG_0} chars)\"; fi"
+      }
+    ]
+  ]
+}

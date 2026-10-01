@@ -1,0 +1,75 @@
+name: E2BIG test (intuit/auto#1294)
+
+on:
+  push:
+    branches:
+      - e2big-test
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  upstream:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download latest released auto
+        run: |
+          url="$(curl -fsSL https://api.github.com/repos/intuit/auto/releases/latest | jq -r '.assets[] | select(.name == "auto-linux.gz") | .browser_download_url')"
+          wget -qO- "$url" | gunzip > ~/auto
+          chmod a+x ~/auto
+          ~/auto --version
+
+      - name: auto release with exec afterRelease (expected to fail with E2BIG)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          ~/auto release -v --from v0.0.0 --prerelease \
+            --use-version "v0.0.${{ github.run_number }}-upstream.${{ github.run_attempt }}" 2>&1 | tee /tmp/out
+          rc=${PIPESTATUS[0]}
+          echo "auto exit code: $rc"
+          if grep -q E2BIG /tmp/out; then
+            echo "::notice::Reproduced E2BIG with released auto (exit code $rc)"
+          else
+            echo "::error::E2BIG was not reproduced (exit code $rc)"
+            exit 1
+          fi
+
+  patched:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check out auto with the fix
+        uses: actions/checkout@v4
+        with:
+          repository: yarikoptic/intuit-auto
+          ref: claude/stoic-cerf-o8sk1n
+          path: auto-src
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build auto
+        working-directory: auto-src
+        run: |
+          yarn install --frozen-lockfile --ignore-engines
+          npx tsc -b tsconfig.dev.json
+          node packages/cli/dist/bin/auto.js --version
+
+      - name: auto release with exec afterRelease (expected to pass)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -o pipefail
+          node auto-src/packages/cli/dist/bin/auto.js release -v --from v0.0.0 --prerelease \
+            --use-version "v0.0.${{ github.run_number }}-patched.${{ github.run_attempt }}" 2>&1 | tee /tmp/out
+          grep -q "afterRelease: ARG_0 passed via file" /tmp/out
